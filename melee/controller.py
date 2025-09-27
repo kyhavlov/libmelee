@@ -153,7 +153,8 @@ class Controller:
                                 None
                             )
                             return True
-                        except pywintypes.error:
+                        except pywintypes.error as e:
+                            print("exception: ", e)
                             time.sleep(1)
                 else:
                     self.pipe = open(self.pipe_path, "w")

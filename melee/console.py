@@ -289,6 +289,7 @@ class Console:
                  save_replays: bool = True,
                  replay_dir: Optional[str] = None,
                  user_json_path: Optional[str] = None,
+                 user_json_path2: Optional[str] = None,
                  log_level: int = 3,  # WARN, see Source/Core/Common/Logging/Log.h
                  log_types: list[str] = ['SLIPPI'],
                  infinite_time: bool = False,
@@ -296,6 +297,7 @@ class Console:
                  enable_ffw=False,
                  dump_config: Optional[DumpConfig] = None,
                  debug: bool = False,
+                 force_lan_ip: str = "",
                 ):
         """Create a Console object
 
@@ -400,6 +402,7 @@ class Console:
         self.user_json_path = user_json_path
         self.log_level = log_level
         self.log_types = log_types
+        #print("dolphin logging: ", log_level, log_types)
         self.infinite_time = infinite_time
         self.use_exi_inputs = use_exi_inputs
         if enable_ffw and not use_exi_inputs:
@@ -407,6 +410,7 @@ class Console:
         self.enable_ffw = enable_ffw
         self.dump_config = dump_config
         self.debug = debug
+        self._force_lan_ip = force_lan_ip
 
         # Keep a running copy of the last gamestate produced
         self._prev_gamestate = GameState()
@@ -554,6 +558,7 @@ class Console:
         if environment_vars is not None:
             env.update(environment_vars)
 
+        #print("dolphin command: ", command)
         self._process = subprocess.Popen(command, env=env)
 
     def stop(self):
@@ -621,6 +626,10 @@ class Console:
           config.set("Core", "SlippiSaveReplays", str(self.save_replays))
           if self.replay_dir:
               config.set("Core", "SlippiReplayDir", self.replay_dir)
+
+        if self._force_lan_ip != "":
+            config.set("Core", 'SlippiForceLanIp', "True")
+            config.set("Core", 'SlippiLanIp', str(self._force_lan_ip))
 
         # Turn on background input so we don't need to have window focus on dolphin
         config.set("Input", 'backgroundinput', "True")

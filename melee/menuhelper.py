@@ -12,7 +12,9 @@ from melee import enums
 
 class MenuHelper():
 
-    def __init__(self) -> None:
+    def __init__(self, 
+                 is_singles: bool = True,
+                 remote_players: list[int] = []) -> None:
         # State for entering a direct code.
         self.name_tag_index: int = 0
         self.inputs_live: bool = False
@@ -25,6 +27,14 @@ class MenuHelper():
         # Whether the stage has already been selected.
         self.stage_selected: bool = False
 
+        self.done_selecting_character: dict[bool] = {1: False, 2: False, 3: False, 4: False}
+
+        if is_singles:
+            self.done_selecting_character = {1: False, 2: False}
+        self.enabled_teams: bool = is_singles
+        self.configured_teams: dict[bool] = {1: 0, 2: 0, 3: 0, 4: 0}
+        self.start_wait: int = 0
+
     def menu_helper_simple(
         self,
         gamestate: GameState,
@@ -32,11 +42,14 @@ class MenuHelper():
         character_selected: enums.Character,
         stage_selected: enums.Stage,
         connect_code: str = "",
+        teams_connect_code: str = "",
         cpu_level: int = 0,
         costume: int = 0,
         autostart: bool = False,
         swag: bool = False,
         frozen_stadium: bool = True,
+        offline_teams: bool = False,
+        desired_teams: dict[int, int] = {},
     ):
         """Simplified menu helper function to get you through the menus and into a game
 
@@ -61,23 +74,57 @@ class MenuHelper():
         # If we're at the character select screen, choose our character
         if gamestate.menu_state in [enums.Menu.CHARACTER_SELECT, enums.Menu.SLIPPI_ONLINE_CSS]:
             if gamestate.submenu == enums.SubMenu.NAME_ENTRY_SUBMENU:
-                self.enter_direct_code(
-                    gamestate=gamestate,
-                    controller=controller,
-                    connect_code=connect_code)
+                if teams_connect_code:
+                    self.enter_direct_code(
+                        gamestate=gamestate,
+                        controller=controller,
+                        connect_code=teams_connect_code)
+                else:
+                    self.enter_direct_code(
+                        gamestate=gamestate,
+                        controller=controller,
+                        connect_code=connect_code)
             else:
-                # We've exited the name entry screen, so reset the state in case we go back
                 self.name_tag_index = 0
-                self.inputs_live = False
+                ai_state = gamestate.players[controller.port]
+                
+                # quick hack to toggle teams mode
+                #print("character: ", ai_state.character, character_selected)
 
-                self.choose_character(
-                    character=character_selected,
-                    gamestate=gamestate,
-                    controller=controller,
-                    cpu_level=cpu_level,
-                    costume=costume,
-                    swag=swag,
-                    start=autostart)
+                if not self.done_selecting_character[controller.port]:
+                    '''if controller.port == 1:
+                        print("p1 choosing character")'''
+                    self.choose_character(
+                        character=character_selected,
+                        gamestate=gamestate,
+                        controller=controller,
+                        cpu_level=cpu_level,
+                        costume=costume,
+                        swag=swag,
+                        start=autostart)
+                    correct_character = ai_state.character == character_selected
+                    if character_selected is enums.Character.SHEIK:
+                        correct_character = ai_state.character == enums.Character.ZELDA
+                    if correct_character and (ai_state.coin_down or teams_connect_code) and ai_state.cpu_level == cpu_level:
+                        self.done_selecting_character[controller.port] = True
+                        #print("done selecting character for port: ", controller.port)
+                        controller.release_all()
+                elif controller.port == 1 and offline_teams and not self.enabled_teams:
+                    self.enable_offline_teams(gamestate, controller)
+                elif controller.port == 1 and len(desired_teams) > 0 and not self.done_configuring_teams(desired_teams):
+                    self.configure_teams(gamestate, controller, desired_teams, teams_connect_code is not None)
+                elif controller.port == 1:
+                    if gamestate.frame % 2 == 0:
+                        controller.release_all()
+                        return
+                    if gamestate.ready_to_start == 0:
+                        if all(done for done in self.done_selecting_character.values()) or (teams_connect_code is not None and self.done_selecting_character[controller.port]):
+                            controller.press_button(enums.Button.BUTTON_START)
+                            return
+                    else:
+                        controller.release_all()
+                        return
+                        
         # If we're at the postgame scores screen, spam START
         elif gamestate.menu_state == enums.Menu.POSTGAME_SCORES:
             self.skip_postgame(controller=controller)
@@ -91,10 +138,150 @@ class MenuHelper():
                               character=character_selected,
                               frozen_stadium=frozen_stadium)
         elif gamestate.menu_state == enums.Menu.MAIN_MENU:
-            if connect_code:
+            #print("menuing", teams_connect_code, connect_code, gamestate.menu_state, gamestate.submenu, gamestate.menu_selection)
+            if teams_connect_code:
+                self.choose_teams_online(gamestate=gamestate, controller=controller)
+            elif connect_code:
                 self.choose_direct_online(gamestate=gamestate, controller=controller)
             else:
                 self.choose_versus_mode(gamestate=gamestate, controller=controller)
+
+    def done_configuring_teams(self, desired_teams):
+        for port, team in desired_teams.items():
+            if self.configured_teams[port] != team:
+                return False
+        return True
+
+    def configure_teams(self, 
+                        gamestate: GameState,
+                        controller: Controller,
+                        desired_teams: dict[int, int],
+                        is_online: bool = True):
+        ai_state = gamestate.players[controller.port]
+        cursor_x, cursor_y = ai_state.cursor.x, ai_state.cursor.y
+        
+        target_player = 1
+        for port, team in desired_teams.items():
+            if self.configured_teams[port] != team:
+                target_player = port
+                break
+
+        target_y = -4.0
+        #target_x = -24.0 + (16.0 * (target_player-1))
+        target_x = -24.0 + (16.0 * (target_player-1))
+
+        if is_online:
+            target_x = -20.0
+        
+        wiggleroom = 0.75
+
+        isOverTarget = abs(cursor_x - target_x) < wiggleroom and \
+            abs(cursor_y - target_y) < wiggleroom
+
+        #print("toggling team for player: ", target_player, self.configured_teams[port], desired_teams[port], cursor_x, cursor_y, target_x, target_y)
+
+        if isOverTarget:
+            controller.tilt_analog(enums.Button.BUTTON_MAIN, .5, .5)
+
+            #print("IS OVER TARGET")
+            if controller.prev.button[enums.Button.BUTTON_A] == False:
+                controller.press_button(enums.Button.BUTTON_A)
+                #print("PRESSED OVER TARGET")
+                return
+            else:
+                controller.release_button(enums.Button.BUTTON_A)
+                self.configured_teams[target_player] += 1
+                controller.release_all()
+                #print("RELEASED OVER TARGET")
+                return
+        else:
+            #Move in
+            #controller.release_button(enums.Button.BUTTON_A)
+            #Move up if we're too low
+            if cursor_y < target_y - wiggleroom:
+                #print("moving up")
+                controller.tilt_analog(enums.Button.BUTTON_MAIN, .5, 1)
+                return
+            #Move down if we're too high
+            if cursor_y > target_y + wiggleroom:
+                #print("moving down")
+                controller.tilt_analog(enums.Button.BUTTON_MAIN, .5, 0)
+                return
+            #Move right if we're too left
+            if cursor_x < target_x - wiggleroom:
+                controller.tilt_analog(enums.Button.BUTTON_MAIN, 1, .5)
+                return
+            #Move left if we're too right
+            if cursor_x > target_x + wiggleroom:
+                controller.tilt_analog(enums.Button.BUTTON_MAIN, 0, .5)
+                return
+
+    def enable_offline_teams(self,
+                             gamestate: GameState,
+                             controller: Controller):
+
+        ai_state = gamestate.players[controller.port]
+        cursor_x, cursor_y = ai_state.cursor.x, ai_state.cursor.y
+        
+        # Move the cursor to toggle teams mode on
+        #print("in teams block")
+        if not gamestate.is_teams:
+            #print("enabling teams")
+            #Height starts at 1, plus half a box height, plus the number of rows
+            target_y = 25.0
+            #Starts at -32.5, plus half a box width, plus the number of columns
+            #NOTE: Technically, each column isn't exactly the same width, but it's close enough
+            target_x = -31.5
+            #Wiggle room in positioning character
+            wiggleroom = 1.5
+            #print(cursor_x, cursor_y, target_x, target_y)
+
+            isOverTeams = abs(cursor_x - target_x) < wiggleroom and \
+            abs(cursor_y - target_y) < wiggleroom
+
+            if isOverTeams:
+                #print("IS OVER TEAMS")
+                if controller.prev.button[enums.Button.BUTTON_A] == False:
+                    controller.press_button(enums.Button.BUTTON_A)
+                    return
+                else:
+                    controller.release_button(enums.Button.BUTTON_A)
+                    self.enabled_teams = True
+                    #print("enabled teams")
+                    return
+            else:
+                #Move in
+                #controller.release_button(enums.Button.BUTTON_A)
+                #Move up if we're too low
+                if cursor_y < target_y - wiggleroom:
+                    #print("moving up")
+                    controller.tilt_analog(enums.Button.BUTTON_MAIN, .5, 1)
+                    return
+                #Move down if we're too high
+                if cursor_y > target_y + wiggleroom:
+                    #print("moving down")
+                    controller.tilt_analog(enums.Button.BUTTON_MAIN, .5, 0)
+                    return
+                #Move right if we're too left
+                if cursor_x < target_x - wiggleroom:
+                    controller.tilt_analog(enums.Button.BUTTON_MAIN, 1, .5)
+                    return
+                #Move left if we're too right
+                if cursor_x > target_x + wiggleroom:
+                    controller.tilt_analog(enums.Button.BUTTON_MAIN, 0, .5)
+                    return
+            controller.release_all()
+        
+        '''elif controller.port == 1 and self.configured_teams[1] and self.configured_teams[2]:
+            if gamestate.frame % 2 == 0:
+                controller.release_all()
+                return
+            if gamestate.ready_to_start == 0:
+                controller.press_button(enums.Button.BUTTON_START)
+                return
+            else:
+                controller.release_all()
+                return'''
 
     def enter_direct_code(
             self, gamestate: GameState, controller: Controller, connect_code: str):
@@ -211,6 +398,7 @@ class MenuHelper():
                 break
 
         isSlippiCSS = gamestate.menu_state == enums.Menu.SLIPPI_ONLINE_CSS
+        #print("menu state: ", gamestate.menu_state, gamestate.submenu)
         if isSlippiCSS:
             ai_state = gamestate.players[1]
             swag = True
@@ -392,7 +580,7 @@ class MenuHelper():
             if gamestate.frame % 2 == 0:
                 controller.release_all()
                 return
-            if start and (gamestate.ready_to_start == 0):
+            if start and (gamestate.ready_to_start == 0) and gamestate.is_teams and controller.port == 1:
                 controller.press_button(enums.Button.BUTTON_START)
                 return
             else:
@@ -672,6 +860,43 @@ class MenuHelper():
                     controller.press_button(enums.Button.BUTTON_A)
                 else:
                     controller.tilt_analog(enums.Button.BUTTON_MAIN, .5, 0)
+            elif gamestate.submenu == enums.SubMenu.MAIN_MENU_SUBMENU:
+                controller.press_button(enums.Button.BUTTON_A)
+            elif gamestate.submenu == enums.SubMenu.ONEP_MODE_SUBMENU:
+                if gamestate.menu_selection == 2:
+                    controller.press_button(enums.Button.BUTTON_A)
+                else:
+                    controller.tilt_analog(enums.Button.BUTTON_MAIN, .5, 0)
+
+            elif gamestate.submenu == enums.SubMenu.NAME_ENTRY_SUBMENU:
+                pass
+            else:
+                controller.press_button(enums.Button.BUTTON_B)
+        elif gamestate.menu_state == enums.Menu.PRESS_START:
+            controller.press_button(enums.Button.BUTTON_START)
+        else:
+            controller.release_all()
+
+    @staticmethod
+    def choose_teams_online(gamestate: GameState, controller: Controller):
+        """Helper function to bring us into the teams direct connect online menu
+
+        Args:
+            gamestate (gamestate.GameState): The current gamestate
+            controller (controller.Controller): The controller to press buttons on
+        """
+        # Let the controller go every other frame. Makes the logic below easier
+        if gamestate.frame % 2 == 0:
+            controller.release_all()
+            return
+        
+        if gamestate.menu_state == enums.Menu.MAIN_MENU:
+            if gamestate.submenu == enums.SubMenu.ONLINE_PLAY_SUBMENU:
+                if gamestate.menu_selection == 3:
+                    controller.press_button(enums.Button.BUTTON_A)
+                else:
+                    controller.tilt_analog(enums.Button.BUTTON_MAIN, .5, 0)
+                    #print("moving to teams")
             elif gamestate.submenu == enums.SubMenu.MAIN_MENU_SUBMENU:
                 controller.press_button(enums.Button.BUTTON_A)
             elif gamestate.submenu == enums.SubMenu.ONEP_MODE_SUBMENU:
