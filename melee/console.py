@@ -1365,6 +1365,14 @@ class Console:
 
         Modifies specified gamestate based on the event bytes
          """
+        # Some Slippi builds can emit short/non-menu payloads as menu_event
+        # around online transitions. Ignore them rather than crashing callers.
+        if len(event_bytes) <= 0x3C:
+            logging.warning(
+                "Ignoring short Slippstream menu event payload: len=%d",
+                len(event_bytes))
+            return
+
         scene = np.ndarray((1,), ">H", event_bytes, 0x1)[0]
         if scene == 0x02:
             gamestate.menu_state = enums.Menu.CHARACTER_SELECT

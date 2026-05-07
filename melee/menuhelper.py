@@ -71,6 +71,10 @@ class MenuHelper():
                 Only makes sense for Slippi >= 3.19.0.
         """
 
+        if gamestate.menu_state != enums.Menu.STAGE_SELECT and self.stage_selected:
+            self.stage_selected = False
+            self.frames_on_stage = 0
+
         # If we're at the character select screen, choose our character
         if gamestate.menu_state in [enums.Menu.CHARACTER_SELECT, enums.Menu.SLIPPI_ONLINE_CSS]:
             if gamestate.submenu == enums.SubMenu.NAME_ENTRY_SUBMENU:
@@ -317,18 +321,17 @@ class MenuHelper():
 
         target_character = connect_code[self.name_tag_index]
         target_code = 45
-        column = "ABCDEFGHIJ".find(target_character)
-        if column != -1:
-            target_code = 45 - (column * 5)
-        column = "KLMNOPQRST".find(target_character)
-        if column != -1:
-            target_code = 46 - (column * 5)
-        column = "UVWXYZ   #".find(target_character)
-        if column != -1:
-            target_code = 47 - (column * 5)
-        column = "0123456789".find(target_character)
-        if column != -1:
-            target_code = 48 - (column * 5)
+        for row, characters in enumerate((
+            "ABCDEFGHIJ",
+            "KLMNOPQRST",
+            "UVWXYZ   #",
+            "0123456789",
+            "-+=!?@%&$.",
+        )):
+            column = characters.find(target_character)
+            if column != -1:
+                target_code = 45 + row - (column * 5)
+                break
 
         if gamestate.menu_selection == target_code:
             controller.press_button(enums.Button.BUTTON_A)
