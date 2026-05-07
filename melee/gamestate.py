@@ -99,6 +99,14 @@ class GameState:
     """(string): Platform the game was played on (values include dolphin, console, and network). Might be blank."""
     consoleNick: str = ""
     """(string): The name of the console the replay was created on. Might be blank."""
+    local_player_index: Optional[int] = None
+    """(int): Zero-based local Slippi player index for this Dolphin, if reported."""
+    local_player_port: Optional[int] = None
+    """(int): One-based local controller port for this Dolphin, if reported."""
+    finalized_frame: Optional[int] = None
+    """(int): Latest frame finalized by netplay, if reported by Dolphin."""
+    is_finalized: bool = False
+    """(bool): Whether this gamestate is at or before finalized_frame."""
     _newframe: bool = True
     custom: dict = field(default_factory=dict)
     """(dict): Custom fields to be added by the user"""

@@ -394,6 +394,9 @@ class Console:
         self._is_teams = False
         self._display_names: dict[int, str] = {}
         self._connect_codes: dict[int, str] = {}
+        self._local_player_index: Optional[int] = None
+        self._local_player_port: Optional[int] = None
+        self._finalized_frame: Optional[int] = None
 
         # Stage-specific state tracking
         self._fod_platforms: Optional[gamestate_lib.FoDPlatforms] = None
@@ -811,6 +814,16 @@ class Console:
             if message is None:
                 return None
 
+            if "local_player_index" in message:
+                local_player_index = int(message["local_player_index"])
+                self._local_player_index = local_player_index if local_player_index >= 0 else None
+            if "local_player_port" in message:
+                local_player_port = int(message["local_player_port"])
+                self._local_player_port = local_player_port if local_player_port > 0 else None
+            if "finalized_frame" in message:
+                finalized_frame = int(message["finalized_frame"])
+                self._finalized_frame = finalized_frame if finalized_frame >= 0 else None
+
             if message["type"] == "connect_reply":
                 self.connected = True
                 self.nick = message["nick"]
@@ -851,6 +864,13 @@ class Console:
         gamestate.playedOn = self._slippstream.playedOn
         gamestate.startAt = self._slippstream.timestamp
         gamestate.consoleNick = self._slippstream.consoleNick
+        gamestate.local_player_index = self._local_player_index
+        gamestate.local_player_port = self._local_player_port
+        gamestate.finalized_frame = self._finalized_frame
+        gamestate.is_finalized = (
+            self._finalized_frame is not None and
+            gamestate.frame <= self._finalized_frame
+        )
         for i, names in self._slippstream.players.items():
             try:
                 gamestate.players[int(i)+1].nickName = names["names"]["netplay"]
