@@ -19,6 +19,7 @@ import csv
 import subprocess
 import platform
 import math
+import re
 import base64
 import numpy as np
 from pathlib import Path
@@ -190,10 +191,12 @@ def get_dolphin_version(path: str) -> DolphinVersion:
             build=DolphinBuild.NETPLAY,
         )
 
-    # Ishiiruka actually gives returncode 1 and puts
-    # "Faster Melee - Slippi (3.4.0)" in stderr!
-    output = result.stdout if result.returncode == 0 else result.stderr
-    output = output.strip()
+    # Different builds put version in different streams / return codes:
+    # - mainline Linux can return 255 with stdout like "3.5.2"
+    # - Ishiiruka returns 1 with stderr like "Faster Melee - Slippi (...)"
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+    output = stdout if stdout else stderr
 
     # Mainline versions look like "4.0.0-mainline-beta.4"
     if output.find('mainline') != -1:
@@ -205,8 +208,18 @@ def get_dolphin_version(path: str) -> DolphinVersion:
             build=DolphinBuild.NETPLAY,
         )
 
+    # Some Slippi netplay appimages report plain semver (e.g. "3.5.2") with
+    # non-zero return code.
+    if re.match(r'^\d+\.\d+\.\d+(?:[-+].*)?$', output):
+        version = output.split('-')[0]
+        return DolphinVersion(
+            mainline=False,
+            version=version,
+            build=DolphinBuild.NETPLAY,
+        )
+
     # Ishiiruka on MacOS behaves a bit differently.
-    if platform.system() == 'Darwin':
+    if platform.system() == 'Darwin' and 'ExiAI' not in path:
         # Sadly playback dolphin doesn't output anything differently, so we
         # just assume it's a netplay build.
         assert result.returncode == 255
@@ -226,13 +239,11 @@ def get_dolphin_version(path: str) -> DolphinVersion:
     end = contents[1].find(')')
     version = contents[1][begin:end]
 
-    if len(contents) == 2:
-        build = DolphinBuild.NETPLAY
-    else:
-        build_str = contents[2]
-        if build_str not in _STRING_TO_BUILD:
-            raise ValueError(f'Unexpected dolphin version {output}')
-        build = _STRING_TO_BUILD[build_str]
+    build = DolphinBuild.NETPLAY
+    for build_str in contents[2:]:
+        if build_str in _STRING_TO_BUILD:
+            build = _STRING_TO_BUILD[build_str]
+            break
 
     return DolphinVersion(False, version, build)
 
